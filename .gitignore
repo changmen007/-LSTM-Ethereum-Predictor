@@ -1,27 +1,36 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Virtual Environment
 .env
 .venv
 env/
 venv/
 ENV/
+
+# Logs and databases
 *.log
-.DS_Store
+*.sqlite3
+trading.db
+
+# IDE
 .idea/
 .vscode/
 
-# Model files
-models/*.keras
-models/*.h5
-models/*.pkl
-models/*.model
-models/*.bin
+# OS
+.DS_Store
+Thumbs.db
 
-# Database files
-*.db
-trading.db
+# Project specific
+log/*
+!log/.gitkeep
 
-# Generated files
-log/
-visualization/
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
