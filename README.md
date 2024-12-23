@@ -11,12 +11,19 @@ ETH 价格预测系统/
 ├── models/                   # 模型文件目录
 │   └── eth_price_predictor_1h_v8.keras  # LSTM模型文件
 ├── src/                     # 源代码目录
+│   ├── api.py              # Web API 接口模块
+│   ├── config.py           # 全局配置管理模块
+│   ├── models.py           # 数据模型定义模块
 │   ├── data_fetcher.py      # 数据获取模块
 │   ├── predictor.py         # 预测模块
 │   ├── utils.py             # 工具模块
 │   ├── simulator.py         # 模拟交易模块
 │   ├── trading_signals.py   # 交易信号生成模块
-│   └── run_simulation.py    # 运行模拟交易主程序
+│   ├── run_simulation.py    # 运行模拟交易主程序
+│   └── static/             # 静态资源目录
+│       ├── index.html       # Web 界面主页
+│       ├── css/            # 样式文件
+│       └── js/             # JavaScript 文件
 └── log/                     # 日志目录
     └── session_[timestamp]/ # 每个交易会话的日志目录
 ```
@@ -95,6 +102,42 @@ ETH 价格预测系统/
      * 交易模拟器日志 (trading_simulator.log)
      * 预测分布图 (latest_distribution.png)
 
+7. **Web API 和可视化界面 (api.py & static/)**
+   - RESTful API 接口：
+     * `/api/trading-data`: 获取详细交易数据
+     * `/api/trades`: 获取所有交易记录
+     * `/api/summary`: 获取交易统计摘要
+     * `/api/trading-data-simplified`: 获取简化版交易数据
+   - 实时数据展示界面：
+     * 交易数据可视化
+     * 实时收益率曲线
+     * 交易历史记录
+   - 启动方式：
+     ```bash
+     uvicorn api:app --reload --app-dir src
+     ```
+
+8. **全局配置管理 (config.py)**
+   - 集中管理所有配置项：
+     * 数据库配置
+     * 交易模拟器配置
+     * 文件路径配置
+     * API配置
+     * 模型配置
+   - 配置更新流程：
+     1. 修改 `config.py` 中的相关配置
+     2. 如需添加新模型，更新 `get_model_config()` 方法
+     3. 所有配置修改立即生效，无需修改其他文件
+
+9. **数据模型管理 (models.py)**
+   - SQLAlchemy ORM 模型定义：
+     * `TradingSnapshot`: 交易快照数据
+     * `Trade`: 交易记录
+   - 数据库表结构：
+     * 自动创建和管理数据库表
+     * 支持 SQLite 数据库
+     * 完整的交易数据存储
+
 ## 安装步骤
 
 1. **环境要求**
@@ -128,6 +171,45 @@ python src/run_simulation.py
 4. 预测结果和交易信号仅供参考，不构成投资建议
 5. 注意 Binance API 的访问频率限制
 6. 建议定期备份交易历史和日志数据
+
+## 更新流程
+
+1. **添加新的预测模型**
+   1. 将新模型文件放入 `models/` 目录
+   2. 在 `config.py` 中更新模型配置：
+      ```python
+      @classmethod
+      def get_model_config(cls):
+          return {
+              "model_path": str(cls.MODELS_DIR / "new_model.pkl"),
+              "model_params": {
+                  "input_size": 10,
+                  "output_size": 1,
+                  "hidden_size": 64
+              }
+          }
+      ```
+   3. 如需要，更新 `predictor.py` 中的预测逻辑
+
+2. **修改交易参数**
+   1. 在 `config.py` 中更新交易配置：
+      ```python
+      INITIAL_CAPITAL = 200_000.0  # 修改初始资金
+      UNIT_SIZE = 20_000.0        # 修改交易单位大小
+      MAX_UNITS = 5.0            # 修改最大交易单位数
+      ```
+
+3. **自定义 Web 界面**
+   1. 在 `static/` 目录中修改相关文件：
+      - `index.html`: 更新页面结构
+      - `css/`: 修改样式文件
+      - `js/`: 更新交互逻辑
+   2. 如需添加新的 API 接口，在 `api.py` 中定义
+
+4. **数据库结构变更**
+   1. 在 `models.py` 中更新数据模型定义
+   2. 删除旧的数据库文件（如果存在）
+   3. 重新运行程序，会自动创建新的数据库结构
 
 ## 开发计划
 
