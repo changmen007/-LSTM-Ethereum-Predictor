@@ -10,3 +10,18 @@ ENV/
 .DS_Store
 .idea/
 .vscode/
+
+# Model files
+models/*.keras
+models/*.h5
+models/*.pkl
+models/*.model
+models/*.bin
+
+# Database files
+*.db
+trading.db
+
+# Generated files
+log/
+visualization/
