@@ -17,8 +17,8 @@ logging.basicConfig(
 class Position:
     """仓位信息"""
     size: float  # 持仓数量
-    entry_price: float  # 入场价格
-    timestamp: datetime  # 开仓时间
+    timestamp: datetime  # 更新时间
+    entry_price: float = 0.0  # 入场价格，仅作参考，实际成本通过open_trades计算
 
 @dataclass
 class Trade:
@@ -82,22 +82,21 @@ class TradingSimulator:
         try:
             current_price = signal.current_price if signal else (self.position.entry_price if self.position else 0)
             portfolio_value = self.get_portfolio_value(current_price)
-            unrealized_pnl = 0.0
-            position_cost = 0.0
-            position_value = 0.0
+            
+            # 获取当前持仓信息
+            total_shares, weighted_avg_cost = self.get_aggregate_position_info()
+            position_cost = total_shares * weighted_avg_cost
+            position_value = total_shares * current_price
+            unrealized_pnl = total_shares * (current_price - weighted_avg_cost) if total_shares > 0 else 0.0
             
             logging.info("\n=== 组合状态 ===")
             logging.info(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logging.info(f"初始资金: ${self.initial_capital:,.2f}")
             logging.info(f"当前现金: ${self.cash:,.2f}")
             
-            if self.position:
-                position_cost = self.position.size * self.position.entry_price
-                position_value = self.position.size * current_price
-                unrealized_pnl = self.position.size * (current_price - self.position.entry_price)
-                
-                logging.info(f"持仓数量: {self.position.size:,.4f}")
-                logging.info(f"持仓均价: ${self.position.entry_price:,.2f}")
+            if total_shares > 0:
+                logging.info(f"持仓数量: {total_shares:,.4f}")
+                logging.info(f"持仓均价: ${weighted_avg_cost:,.2f}")
                 logging.info(f"当前市价: ${current_price:,.2f}")
                 logging.info(f"持仓成本: ${position_cost:,.2f}")
                 logging.info(f"持仓市值: ${position_value:,.2f}")
@@ -126,8 +125,8 @@ class TradingSimulator:
                 snapshot = DBTradingSnapshot(
                     initial_capital=self.initial_capital,
                     current_cash=self.cash,
-                    position_size=self.position.size if self.position else 0,
-                    position_entry_price=self.position.entry_price if self.position else 0,
+                    position_size=total_shares,
+                    position_entry_price=weighted_avg_cost,
                     current_price=current_price,
                     position_cost=position_cost,
                     position_value=position_value,
@@ -154,108 +153,74 @@ class TradingSimulator:
         logging.info("================\n")
 
     def get_current_units(self) -> float:
-        """获取当前持仓单位数"""
-        if self.position is None:
+        """
+        计算当前策略持有的"单位"数 = ( 持仓总价值 / unit_size )
+        改为基于 open_trades 的加权成本，而不是 position.entry_price
+        """
+        total_shares, weighted_avg_cost = self.get_aggregate_position_info()
+        if total_shares <= 1e-6:
             return 0.0
-        return (self.position.size * self.position.entry_price) / self.unit_size
-        
+        total_value = total_shares * weighted_avg_cost
+        return total_value / self.unit_size
+
     def calculate_position_adjustment(self, signal: PredictionSignal) -> tuple[str, float]:
         """
         根据信号和当前持仓计算仓位调整
-        返回: (操作类型, 调整单位数)
         """
-        current_units = self.get_current_units()
-        signal_type = signal.signal_type
-        
-        # 操作映射表
-        position_matrix = {
-            # 格式: (当前持仓单位, 信号类型): (操作类型, 调整单位数)
-            # 空仓情况
-            (0, "strong_bullish"): ("buy", 2.0),
-            (0, "moderate_bullish"): ("buy", 1.0),
-            (0, "weak_bullish"): ("buy", 0.5),
-            (0, "neutral"): ("hold", 0),
-            (0, "weak_bearish"): ("hold", 0),
-            (0, "moderate_bearish"): ("hold", 0),
-            (0, "strong_bearish"): ("hold", 0),
-            
-            # 0.5单位持仓
-            (0.5, "strong_bullish"): ("buy", 1.5),
-            (0.5, "moderate_bullish"): ("buy", 1.0),
-            (0.5, "weak_bullish"): ("buy", 0.5),
-            (0.5, "neutral"): ("hold", 0),
-            (0.5, "weak_bearish"): ("sell", 0.5),
-            (0.5, "moderate_bearish"): ("sell", 0.5),
-            (0.5, "strong_bearish"): ("sell", 0.5),
-            
-            # 1.0单位持仓
-            (1.0, "strong_bullish"): ("buy", 1.0),
-            (1.0, "moderate_bullish"): ("buy", 0.5),
-            (1.0, "weak_bullish"): ("hold", 0),
-            (1.0, "neutral"): ("hold", 0),
-            (1.0, "weak_bearish"): ("sell", 0.5),
-            (1.0, "moderate_bearish"): ("sell", 0.5),
-            (1.0, "strong_bearish"): ("sell", 1.0),
-            
-            # 1.5单位持仓
-            (1.5, "strong_bullish"): ("buy", 0.5),
-            (1.5, "moderate_bullish"): ("hold", 0),
-            (1.5, "weak_bullish"): ("hold", 0),
-            (1.5, "neutral"): ("sell", 0.5),
-            (1.5, "weak_bearish"): ("sell", 0.5),
-            (1.5, "moderate_bearish"): ("sell", 1.0),
-            (1.5, "strong_bearish"): ("sell", 1.5),
-            
-            # 2.0单位持仓
-            (2.0, "strong_bullish"): ("hold", 0),
-            (2.0, "moderate_bullish"): ("sell", 0.5),
-            (2.0, "weak_bullish"): ("sell", 0.5),
-            (2.0, "neutral"): ("sell", 1.0),
-            (2.0, "weak_bearish"): ("sell", 1.0),
-            (2.0, "moderate_bearish"): ("sell", 1.5),
-            (2.0, "strong_bearish"): ("sell", 2.0),
+        signal_target_map = {
+            "strong_bullish": 5.0,     # 强看多 -> 满仓
+            "moderate_bullish": 2.0,   # 中等看多 -> 1.5个单位
+            "weak_bullish": 1.0,       # 弱看多 -> 1个单位
+            "neutral": 0.5,            # 中性 -> 0.5个单位
+            "weak_bearish": 0.1,       # 弱看空 -> 0.1个单位
+            "moderate_bearish": 0.0,   # 中等看空 -> 空仓
+            "strong_bearish": 0.0      # 强看空 -> 空仓
         }
         
-        # 对于未在映射表中的情况，使用通用规则
-        if current_units >= self.max_units:  # 满仓
-            if signal_type in ["moderate_bearish", "strong_bearish"]:
-                units_to_sell = 2.0 if signal_type == "strong_bearish" else 1.5
-                return "sell", units_to_sell
-            elif signal_type in ["weak_bearish", "neutral"]:
-                return "sell", 1.0
-            return "hold", 0
-            
-        # 查找映射表中的操作
-        key = (current_units, signal_type)
-        if key in position_matrix:
-            return position_matrix[key]
-            
-        # 对于其他情况，使用基本规则
-        if signal_type == "strong_bullish":
-            if current_units + 2.0 <= self.max_units:
-                return "buy", 2.0
-            elif current_units + 1.0 <= self.max_units:
-                return "buy", 1.0
-        elif signal_type == "moderate_bullish":
-            if current_units + 1.0 <= self.max_units:
-                return "buy", 1.0
-            elif current_units + 0.5 <= self.max_units:
-                return "buy", 0.5
-        elif signal_type == "weak_bullish":
-            if current_units + 0.5 <= self.max_units:
-                return "buy", 0.5
-        elif signal_type == "weak_bearish":
-            if current_units >= 0.5:
-                return "sell", 0.5
-        elif signal_type == "moderate_bearish":
-            if current_units >= 1.0:
-                return "sell", 1.0
-        elif signal_type == "strong_bearish":
-            units_to_sell = min(current_units, 2.0)
-            return "sell", units_to_sell
-            
-        return "hold", 0
+        signal_type = signal.signal_type
+        target_units = signal_target_map.get(signal_type, 0.0)
+        target_units = min(target_units, self.max_units)
         
+        current_units = self.get_current_units()
+        
+        # 如果已经 >= 目标，则无需加仓
+        threshold = 1e-6
+        if current_units >= target_units - threshold:
+            return ("hold", 0.0)
+        
+        # diff
+        diff = target_units - current_units
+        if abs(diff) < threshold:
+            return ("hold", 0.0)
+        
+        if diff > 0:
+            # buy
+            # 也可以再限制，不能超过 max_units
+            can_add = self.max_units - current_units
+            units_to_add = min(diff, can_add)
+            return ("buy", units_to_add)
+        else:
+            # sell
+            return ("sell", abs(diff))
+
+        
+    def get_aggregate_position_info(self) -> tuple[float, float]:
+        """
+        通过 self.open_trades 计算当前剩余总仓位和加权平均成本
+        return: (total_shares, weighted_avg_cost)
+        """
+        total_shares = 0.0
+        total_cost = 0.0
+        for t in self.open_trades:
+            if not t.is_closed and t.remaining_size > 0:
+                total_shares += t.remaining_size
+                total_cost += t.remaining_size * t.entry_price
+        if total_shares > 0:
+            avg_cost = total_cost / total_shares
+            return total_shares, avg_cost
+        else:
+            return 0.0, 0.0
+
     def execute_trade(self, signal: PredictionSignal):
         """执行交易"""
         try:
@@ -267,19 +232,29 @@ class TradingSimulator:
                 return
             
             if action == "buy":
+                # 计算理想买入金额
                 position_value = units * self.unit_size
+                
+                # 如果要购买的金额超过当前现金，就用全部现金买
                 if position_value > self.cash:
-                    logging.info(f"信号类型: {signal.signal_type} - 资金不足，无法买入")
+                    position_value = self.cash
+                
+                # 如果剩下的现金都不足以买 0.01个单位 (可自行调整阈值)
+                if position_value < (0.01 * self.unit_size):
+                    logging.info(f"现金不足以买到 0.01 单位, 放弃买入")
+                    self.log_portfolio_status(signal)
                     return
-                    
-                # 计算可以买入的数量
+                
+                # 计算可以买入的数量（在标的物层面）
                 shares = position_value / signal.current_price
                 
                 logging.info(f"\n=== 执行买入交易 ===")
                 logging.info(f"信号类型: {signal.signal_type}")
+                logging.info(f"想买入单位: {units:.2f} (换算交易金额: {units*self.unit_size:.2f})")
+                logging.info(f"实际可用资金: ${self.cash:,.2f}")
+                logging.info(f"本次实际买入金额: ${position_value:,.2f}")
                 logging.info(f"买入数量: {shares:,.4f}")
                 logging.info(f"买入价格: ${signal.current_price:,.2f}")
-                logging.info(f"交易金额: ${position_value:,.2f}")
                 
                 # 创建新的交易记录
                 new_trade = Trade(
@@ -307,36 +282,27 @@ class TradingSimulator:
                     logging.error(f"保存买入交易记录时发生错误: {e}")
                     self.db.rollback()
                 
-                # 更新持仓
-                if self.position is None:
-                    self.position = Position(
-                        size=shares,
-                        entry_price=signal.current_price,
-                        timestamp=signal.timestamp
-                    )
-                else:
-                    # 更新现有仓位的平均成本
-                    total_value = (self.position.size * self.position.entry_price + 
-                                 shares * signal.current_price)
-                    total_shares = self.position.size + shares
-                    self.position = Position(
-                        size=total_shares,
-                        entry_price=total_value / total_shares,
-                        timestamp=signal.timestamp
-                    )
-                    
+                # 更新持仓信息（仅更新size，不再计算加权成本）
+                total_shares, _ = self.get_aggregate_position_info()
+                self.position = Position(
+                    size=total_shares,
+                    timestamp=signal.timestamp
+                )
+                
                 self.cash -= position_value
-            
+
             elif action == "sell":
                 if not self.open_trades:
                     return
-                    
+                
                 position_value = units * self.unit_size
                 shares_to_sell = position_value / signal.current_price
                 
-                if shares_to_sell >= self.position.size:
-                    shares_to_sell = self.position.size
-                    
+                # 限制不要超过总剩余持仓
+                total_shares, _ = self.get_aggregate_position_info()
+                if shares_to_sell > total_shares:
+                    shares_to_sell = total_shares
+                
                 remaining_to_sell = shares_to_sell
                 total_pnl = 0.0
                 
@@ -358,31 +324,74 @@ class TradingSimulator:
                         trade.exit_size = shares_from_this_trade
                         trade.exit_time = signal.timestamp
                     else:
-                        # 已经有部分平仓，更新平均卖出价格
-                        total_exit_value = (trade.exit_price * trade.exit_size + 
-                                          signal.current_price * shares_from_this_trade)
-                        total_exit_size = trade.exit_size + shares_from_this_trade
-                        trade.exit_price = total_exit_value / total_exit_size
+                        # 已经有部分平仓，更新加权平均卖出价格
+                        old_exit_value = trade.exit_price * trade.exit_size
+                        new_exit_value = signal.current_price * shares_from_this_trade
+                        combined_size = trade.exit_size + shares_from_this_trade
+                        
+                        trade.exit_price = (old_exit_value + new_exit_value) / combined_size
                         trade.exit_size += shares_from_this_trade
+                        trade.exit_time = signal.timestamp
                     
                     trade.remaining_size -= shares_from_this_trade
                     trade.pnl += trade_pnl
                     trade.return_rate = (trade.exit_price - trade.entry_price) / trade.entry_price * 100
                     trade.holding_hours = int((signal.timestamp - trade.entry_time).total_seconds() / 3600)
                     
-                    # 如果这笔交易已经完全平仓
+                    # 只有在完全平仓时才标记为closed
                     if trade.remaining_size == 0:
                         trade.is_closed = True
                         self.open_trades.pop(i)
                         self.closed_trades += 1
                         if trade.pnl > 0:
                             self.profitable_trades += 1
+                            
+                        # 更新数据库中的交易记录
+                        try:
+                            db_trade = self.db.query(DBTrade).filter_by(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                entry_size=trade.entry_size
+                            ).first()
+                            if db_trade:
+                                db_trade.exit_price = trade.exit_price
+                                db_trade.exit_size = trade.exit_size
+                                db_trade.exit_time = trade.exit_time
+                                db_trade.pnl = trade.pnl
+                                db_trade.return_rate = trade.return_rate
+                                db_trade.holding_hours = trade.holding_hours
+                                db_trade.is_closed = True
+                                self.db.commit()
+                                logging.info("✅ 成功更新完全平仓交易记录到数据库")
+                        except Exception as e:
+                            logging.error(f"更新完全平仓交易记录时发生错误: {e}")
+                            self.db.rollback()
                     else:
+                        # 部分平仓时只更新相关字段，不标记为closed
+                        try:
+                            db_trade = self.db.query(DBTrade).filter_by(
+                                entry_time=trade.entry_time,
+                                entry_price=trade.entry_price,
+                                entry_size=trade.entry_size
+                            ).first()
+                            if db_trade:
+                                db_trade.exit_price = trade.exit_price
+                                db_trade.exit_size = trade.exit_size
+                                db_trade.exit_time = trade.exit_time
+                                db_trade.pnl = trade.pnl
+                                db_trade.return_rate = trade.return_rate
+                                db_trade.holding_hours = trade.holding_hours
+                                # 不设置is_closed为True
+                                self.db.commit()
+                                logging.info("✅ 成功更新部分平仓交易记录到数据库")
+                        except Exception as e:
+                            logging.error(f"更新部分平仓交易记录时发生错误: {e}")
+                            self.db.rollback()
                         i += 1
                     
                     remaining_to_sell -= shares_from_this_trade
                 
-                # 更新资金和持仓
+                # 更新资金
                 self.cash += shares_to_sell * signal.current_price
                 self.total_pnl += total_pnl
                 
@@ -393,40 +402,17 @@ class TradingSimulator:
                 logging.info(f"交易金额: ${shares_to_sell * signal.current_price:,.2f}")
                 logging.info(f"交易盈亏: ${total_pnl:,.2f}")
                 
-                # 更新持仓
-                if self.position:
-                    remaining_shares = self.position.size - shares_to_sell
-                    if remaining_shares > 0:
-                        self.position = Position(
-                            size=remaining_shares,
-                            entry_price=self.position.entry_price,
-                            timestamp=signal.timestamp
-                        )
-                    else:
-                        self.position = None
-                
-                # 更新数据库中的交易记录
-                try:
-                    db_trade = self.db.query(DBTrade).filter_by(
-                        entry_time=trade.entry_time,
-                        entry_price=trade.entry_price,
-                        entry_size=trade.entry_size
-                    ).first()
-                    if db_trade:
-                        db_trade.exit_price = signal.current_price
-                        db_trade.exit_size = shares_from_this_trade
-                        db_trade.exit_time = signal.timestamp
-                        db_trade.pnl = trade_pnl
-                        db_trade.return_rate = (signal.current_price - trade.entry_price) / trade.entry_price * 100
-                        db_trade.holding_hours = int((signal.timestamp - trade.entry_time).total_seconds() / 3600)
-                        db_trade.is_closed = True
-                        self.db.commit()
-                        logging.info("✅ 成功更新卖出交易记录到数据库")
-                except Exception as e:
-                    logging.error(f"更新卖出交易记录时发生错误: {e}")
-                    self.db.rollback()
+                # 更新持仓信息（仅更新size，不再计算加权成本）
+                total_shares, _ = self.get_aggregate_position_info()
+                if total_shares > 0:
+                    self.position = Position(
+                        size=total_shares,
+                        timestamp=signal.timestamp
+                    )
+                else:
+                    self.position = None
             
-            # 更新组合状态
+            # 最后更新组合状态
             self.log_portfolio_status(signal)
             
         except Exception as e:
@@ -435,7 +421,8 @@ class TradingSimulator:
 
     def get_portfolio_value(self, current_price: float) -> float:
         """获取当前组合价值"""
-        position_value = 0 if self.position is None else self.position.size * current_price
+        total_shares, _ = self.get_aggregate_position_info()
+        position_value = total_shares * current_price
         return self.cash + position_value
         
     def save_trade_history(self):

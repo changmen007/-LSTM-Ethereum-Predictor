@@ -189,9 +189,10 @@
                 },
                 async fetchData() {
                     try {
+                        const timestamp = new Date().getTime()
                         const [summaryRes, tradingDataRes] = await Promise.all([
-                            axios.get('http://localhost:8000/api/summary'),
-                            axios.get('http://localhost:8000/api/trading-data')
+                            axios.get(`/api/summary-simplified?t=${timestamp}`),
+                            axios.get(`/api/trading-data-simplified?t=${timestamp}`)
                         ])
                         
                         this.connectionStatus = 'connected'
@@ -220,7 +221,13 @@
                     this.charts.return.setOption({
                         tooltip: {
                             trigger: 'axis',
-                            formatter: '{b}<br/>收益率: {c}%'
+                            formatter: function(params) {
+                                return `${params[0].name}<br/>
+                                        ${params[0].seriesName}: ${params[0].value}%`
+                            }
+                        },
+                        legend: {
+                            data: ['收益率']
                         },
                         xAxis: {
                             type: 'category',
@@ -231,6 +238,7 @@
                             name: '收益率(%)'
                         },
                         series: [{
+                            name: '收益率',
                             data: data.return_rates,
                             type: 'line',
                             smooth: true
@@ -242,14 +250,20 @@
                         tooltip: {
                             trigger: 'axis',
                             formatter: function(params) {
-                                const time = params[0].name
-                                const cash = params[0].value
-                                const position = params[1].value
-                                const total = cash + position
+                                const time = params[0].name;
+                                const values = params.reduce((acc, param) => {
+                                    acc[param.seriesName] = param.value;
+                                    return acc;
+                                }, {});
+                                const total = values['现金'] + values['持仓'];
                                 return `${time}<br/>
-                                        现金: $${cash.toFixed(2)} (${(cash/total*100).toFixed(2)}%)<br/>
-                                        持仓: $${position.toFixed(2)} (${(position/total*100).toFixed(2)}%)`
+                                        现金: $${values['现金'].toFixed(2)} (${(values['现金']/total*100).toFixed(2)}%)<br/>
+                                        持仓: $${values['持仓'].toFixed(2)} (${(values['持仓']/total*100).toFixed(2)}%)<br/>
+                                        总额: $${total.toFixed(2)}`
                             }
+                        },
+                        legend: {
+                            data: ['现金', '持仓']
                         },
                         xAxis: {
                             type: 'category',
@@ -281,7 +295,13 @@
                     this.charts.unrealizedPnl.setOption({
                         tooltip: {
                             trigger: 'axis',
-                            formatter: '{b}<br/>未实现盈亏: ${c}'
+                            formatter: function(params) {
+                                return `${params[0].name}<br/>
+                                        ${params[0].seriesName}: $${params[0].value.toFixed(2)}`
+                            }
+                        },
+                        legend: {
+                            data: ['未实现盈亏']
                         },
                         xAxis: {
                             type: 'category',
@@ -292,6 +312,7 @@
                             name: '未实现盈亏($)'
                         },
                         series: [{
+                            name: '未实现盈亏',
                             data: data.unrealized_pnls,
                             type: 'line',
                             smooth: true,
@@ -308,7 +329,13 @@
                     this.charts.drawdown.setOption({
                         tooltip: {
                             trigger: 'axis',
-                            formatter: '{b}<br/>最大回撤: {c}%'
+                            formatter: function(params) {
+                                return `${params[0].name}<br/>
+                                        ${params[0].seriesName}: ${params[0].value}%`
+                            }
+                        },
+                        legend: {
+                            data: ['最大回撤']
                         },
                         xAxis: {
                             type: 'category',
@@ -320,6 +347,7 @@
                             inverse: true
                         },
                         series: [{
+                            name: '最大回撤',
                             data: data.max_drawdowns,
                             type: 'line',
                             smooth: true,
