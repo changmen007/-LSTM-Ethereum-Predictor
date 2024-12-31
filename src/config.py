@@ -7,9 +7,9 @@ class Config:
     CHECK_SAME_THREAD = False
     
     # 交易模拟器配置
-    INITIAL_CAPITAL = 100_000.0
-    UNIT_SIZE = 10_000.0  # 每个交易单位的大小
-    MAX_UNITS = 10.0      # 最大交易单位数
+    INITIAL_CAPITAL = 20_000.0
+    UNIT_SIZE = 2_500.0  # 每个交易单位的大小
+    MAX_UNITS = 5.0      # 最大交易单位数
     
     # 文件路径配置
     BASE_DIR = Path(__file__).parent.parent
