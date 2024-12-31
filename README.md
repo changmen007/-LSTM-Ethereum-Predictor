@@ -4,13 +4,15 @@
 
 
 # 预测模型的基本表现
-
-模型指标
+1. **模型指标**
 ![alt text](image-1.png)
-训练表现及测试表现
+
+2. **训练表现及测试表现**
 ![alt text](training_history_v8.png)
-预测表现
+
+3. **预测表现**
 ![alt text](image.png)
+
 ## 项目结构
 
 ```
