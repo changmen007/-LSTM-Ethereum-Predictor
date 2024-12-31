@@ -69,7 +69,6 @@ class TradingSimulator:
         
         # 配置日志
         if log_file:
-            # 添加文件处理器
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
             logging.getLogger().addHandler(file_handler)
@@ -158,9 +157,16 @@ class TradingSimulator:
         改为基于 open_trades 的加权成本，而不是 position.entry_price
         """
         total_shares, weighted_avg_cost = self.get_aggregate_position_info()
+        # === 打印调试信息（关键！）===
+        logging.info(f"[Debug] get_current_units -> total_shares={total_shares:.4f}, "
+                 f"weighted_avg_cost={weighted_avg_cost:.2f}")   
+
         if total_shares <= 1e-6:
             return 0.0
         total_value = total_shares * weighted_avg_cost
+        # === 打印调试信息（关键！）===        
+        logging.info(f"[Debug] total_value={total_value:.2f}, unit_size={self.unit_size:.2f}")
+
         return total_value / self.unit_size
 
     def calculate_position_adjustment(self, signal: PredictionSignal) -> tuple[str, float]:
@@ -169,7 +175,7 @@ class TradingSimulator:
         """
         signal_target_map = {
             "strong_bullish": 5.0,     # 强看多 -> 满仓
-            "moderate_bullish": 2.0,   # 中等看多 -> 1.5个单位
+            "moderate_bullish": 2.0,   # 中等看多 -> 2个单位
             "weak_bullish": 1.0,       # 弱看多 -> 1个单位
             "neutral": 0.5,            # 中性 -> 0.5个单位
             "weak_bearish": 0.1,       # 弱看空 -> 0.1个单位
@@ -183,16 +189,20 @@ class TradingSimulator:
         
         current_units = self.get_current_units()
         
-        # 如果已经 >= 目标，则无需加仓
         threshold = 1e-6
-        if current_units >= target_units - threshold:
-            return ("hold", 0.0)
-        
-        # diff
+        ### 改动点 >>> 判断是否需要加仓或减仓 <<<
         diff = target_units - current_units
+
+        # === 打印调试信息（关键！）===
+        logging.info(f"[Debug] signal={signal_type}, target_units={target_units:.4f}, "
+                     f"current_units={current_units:.4f}, diff={diff:.4f}")
+
+        # 如果差值在 threshold 以内则保持
         if abs(diff) < threshold:
             return ("hold", 0.0)
-        
+
+        # 如果 diff > 0 => buy
+        # 如果 diff < 0 => sell
         if diff > 0:
             # buy
             # 也可以再限制，不能超过 max_units
@@ -226,6 +236,7 @@ class TradingSimulator:
         try:
             action, units = self.calculate_position_adjustment(signal)
             
+            # 无需调整或 diff=0 => hold
             if action == "hold" or units == 0:
                 logging.info(f"信号类型: {signal.signal_type} - 保持现有仓位")
                 self.log_portfolio_status(signal)
@@ -297,6 +308,9 @@ class TradingSimulator:
                 
                 position_value = units * self.unit_size
                 shares_to_sell = position_value / signal.current_price
+                
+                ### 改动点 >>> 打印出卖出diff信息，方便调试 <<<
+                logging.info(f"--- 准备卖出: diff_units={units:.4f}, position_value=${position_value:.2f}, shares_to_sell={shares_to_sell:.4f}")
                 
                 # 限制不要超过总剩余持仓
                 total_shares, _ = self.get_aggregate_position_info()
@@ -404,6 +418,8 @@ class TradingSimulator:
                 
                 # 更新持仓信息（仅更新size，不再计算加权成本）
                 total_shares, _ = self.get_aggregate_position_info()
+                logging.info(f"[Debug] 更新后 -> 持币数量 ={total_shares:.4f}")
+
                 if total_shares > 0:
                     self.position = Position(
                         size=total_shares,

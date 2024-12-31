@@ -21,9 +21,7 @@ ETH 价格预测系统/
 │   ├── trading_signals.py   # 交易信号生成模块
 │   ├── run_simulation.py    # 运行模拟交易主程序
 │   └── static/             # 静态资源目录
-│       ├── index.html       # Web 界面主页
-│       ├── css/            # 样式文件
-│       └── js/             # JavaScript 文件
+│       └── index.html       # Web 界面主页
 └── log/                     # 日志目录
     └── session_[timestamp]/ # 每个交易会话的日志目录
 ```
