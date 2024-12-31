@@ -2,6 +2,12 @@
 
 这是一个基于 LSTM 深度学习模型的 ETH 加密货币实时价格预测和自动交易系统。该系统通过 Binance API 获取实时价格数据，结合多种技术指标和 BTC 相关性特征进行预测，并通过概率分布分析生成交易信号，执行模拟交易。
 
+
+# 预测模型的基本表现
+![alt text](image.png)
+![alt text](training_history_v8.png)
+![alt text](image-1.png)
+
 ## 项目结构
 
 ```
